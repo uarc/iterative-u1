@@ -12,12 +12,6 @@ The following is the most stripped down core of a stack ISA reasonably possible.
 - write
 - immediate
 
-### Copy
-
-The core ISA is primarily severely flawed because of the inability to copy values from lower in the stack. This will result in needing to write to memory to read multiple times. The next most optimal ISA is one with a copy instruction added.
-
-- copy
-
 ### Branches
 
 It is possible to branch with the core ISA, but it would require some bit manipulation and is not particularly easy. This is one of the most important problems and should be dealt with first.
@@ -26,9 +20,15 @@ It is possible to branch with the core ISA, but it would require some bit manipu
 - branch less than unsigned
 - branch less than signed
 
+### Copy
+
+The core ISA is primarily severely flawed because of the inability to copy values from lower in the stack. This will result in needing to write to memory to read multiple times. The next most optimal ISA is one with a copy instruction added.
+
+- copy
+
 ### Calling
 
-With the current instruction set, to make a call you would first have to have absolute code positions and then do `immediate immediate pc_write`. Then to return you would do `pc_write`, but if you had to return data on the stack then since a `rotate` instruction is not available, it would either need to `write` the return address to memory (which without stack registers would prevent efficient recursion) and then re-read it later or it would require using `copy` on the return address and the caller disposing of the return address, which probably takes two instructions with this system. To avoid this mess, in particular because returning values on the stack is essential, instructions for calling and returning need to be added.
+With the current instruction set, to make a call you would first have to have absolute code positions and then do `immediate immediate pc_write`. Then to return you would do `pc_write`, but if you had to return data on the stack, then since a `rotate` instruction is not available, it would either need to `write` the return address to memory (which without stack registers would prevent efficient recursion) and then re-read it later or it would require using `copy` on the return address and the caller disposing of the return address, which probably takes two instructions with this system. To avoid this mess, in particular because returning values on the stack is essential, instructions for calling and returning need to be added.
 
 - call
 - return
