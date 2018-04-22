@@ -53,3 +53,9 @@ One of those things could be to push a set of registers onto the stack at the be
 If we use a dedicated loop instruction, we can make it so any time we move back to the beginning of the loop that the loop puts the registers on the stack. This is especially helpful because the first iteration of the loop gets the initial inputs, just as in the above solution, but even more useful because now we can automatically return to the beginning without specifically requiring the PC, which is more useful for branching paths conditionally exiting the loop or doing other things. This does make returning take an extra instruction to `unloop` the loop, which is not otherwise necessary since no loop stack or any special loop state exists.
 
 ### Rotate
+
+### Drop
+
+Being able to drop values off of the staack is not vastly important, because if they were optional they could have been in registers which automatically get reset. However, at some point taking advantage of this instruction to leave ordered accumulators on the stack might come in handy.
+
+- drop
