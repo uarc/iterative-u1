@@ -35,13 +35,16 @@ With the current instruction set, to make a call you would first have to have ab
 
 ### Registers
 
-Currently, it is possible to write to the lower addresses of memory to use them like registers. One potential problem is that, when dealing with accumulators, a caller or callee has to push the registers it is using to a stack. This can be mitigated by allowing some registers to be pushed to the stack.
+Currently, it is possible to write to the lower addresses of memory to use them like registers. One potential problem is that, when dealing with accumulators, a caller or callee has to push the registers it is using to a stack. This can be mitigated by allowing some registers to be pushed to the stack on a call. This requires no additional instructions, but an additional instruction is required to be able to update registers below in the call stack.
+
+- update
 
 ### Carry
 
 The lack of a carry bit complicates 64-bit integer handling on 32-bit systems. For 64-bit systems this is not a signifcant concern since any value above 64-bits is likely not a counter and is some sort of GUID. Since 32-bit (and maybe even 16-bit) use cases are still common, it may be necessary to add a carry bit that is preserved on the call stack. To use this bit, the instruction `carry` can be added which adds a 1 to the TOS if the carry bit is set. This allows multi-word addition with one extra instruction. We can similarly define (if desired) an additional `borrow` instruction which subtracts one and then adds the carry, which would allow borrowing during subtraction in one instruction, but it can be done in two instructions otherwise by decrementing and then carrying.
 
 - carry
+- borrow (optional to avoid needing a subtractor)
 - branch carry
 
 ### Loops
@@ -61,6 +64,6 @@ If we use a dedicated loop instruction, we can make it so any time we move back 
 
 ### Drop
 
-Being able to drop values off of the staack is not vastly important, because if they were optional they could have been in registers which automatically get reset. However, at some point taking advantage of this instruction to leave ordered accumulators on the stack might come in handy.
+Being able to drop values off of the stack is not vastly important, because if they were optional they could have been in registers which automatically get reset. However, at some point taking advantage of this instruction might come in handy during the instruction evaluation.
 
 - drop
