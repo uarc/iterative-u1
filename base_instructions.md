@@ -39,7 +39,7 @@ Currently, it is possible to write to the lower addresses of memory to use them 
 
 - update
 
-### Carry
+### Carry (optional)
 
 The lack of a carry bit complicates 64-bit integer handling on 32-bit systems. For 64-bit systems this is not a signifcant concern since any value above 64-bits is likely not a counter and is some sort of GUID. Since 32-bit (and maybe even 16-bit) use cases are still common, it may be necessary to add a carry bit that is preserved on the call stack. To use this bit, the instruction `carry` can be added which adds a 1 to the TOS if the carry bit is set. This allows multi-word addition with one extra instruction. We can similarly define (if desired) an additional `borrow` instruction which subtracts one and then adds the carry, which would allow borrowing during subtraction in one instruction, but it can be done in two instructions otherwise by decrementing and then carrying.
 
@@ -57,9 +57,49 @@ If we use a dedicated loop instruction, we can make it so any time we move back 
 
 Another solution is to use tail-call recursion to implement all loops. In this case, the loop control flow is controlled using existing control-flow instructions. To break the loop, one only needs to return. To continue the loop, one only needs to jump to the beginning. In this case we only need a special jump instruction that copies registers onto the stack to avoid manual register reading on every iteration. This solution is the most practical as it avoids adding new instructions and calls in stack machines are cheap.
 
-- jmpload
+- jump load
   - Jump and load `n` non-pc registers to the stack.
 
 ### Rotate
+
+It is possible to rotate items on the stack to the top above a certain depth. This allows re-ordering of the stack. Re-ordering the stack is useful for creating accumulators that reside on the stack that are updated multiple times. For values that are computed once and used multiple times, but never updated, copying is useful.
+
+Rotation is expensive:
+
+- It requires the top registers on the stack to be able to shift down conditionally.
+- It disallows the top registers to be stored or cached in a larger memory due to modifying all elements simultaneously.
+- It takes more die area to implement than copy.
+- It has a bad effect on power consumption compared to copy.
+- It takes a lot of instruction space or makes decoding harder by forcing more instructions to be dynamically sized.
+- It means the stack ordering will have to be tracked when compiling in a more stateful way, increasing compile times.
+- It would be slower to accumulate than a register machine because the critical path of lookup and accumulate is longer.
+- It would require more instructions than a register machine because every accumulate requires a rotate.
+
+If we can help it, we want to avoid rotation. Backing the stack with real memory is very important for blazing fast threading and coroutines in stack processors. With copy instructions, anything below the top two elements will never be modified, so little stack memory will ever need to be flushed to main memory and the hardware to mediate caching and writing out the stack will be simpler.
+
+How can rotation be avoided? The register file is another way to store accumulators that doesn't require rotation. However, to accumulate to the register file, we must perform a read-accumulate-write (RAW) operation, which is currently a prohibitive 3 (or 4 if you count the instruction space of the index) instructions. Although this operation could be executed faster than a rotate-accumulate in theory, it increases the instruction decoding logic complexity greatly.
+
+### Efficient accumulation
+
+We need to be able to accumulate to the register file ASAP and with as few instructions as possible. Firstly, we don't want to expand the instruction space to include accumulate variants for every register if possible. To reuse existing accumulate operations, it is necessary to combine the writeback step of the accumulation with the existing operation using a stateful register that says where we will writeback to. We could implement this by adding an instruction which fetches the register and then forces the next operation to write its result to the register file, but if we do this then it becomes impossible to do any accumulation operation that requires more than one instruction or requires the accumulator to be the second element on the stack.
+
+An example of needing the accumulator to be the second element is when the accumulator is a **minuend** and the current top-of-stack (TOS) is the **subtrahend**. In this case, the algorithm is subtracting from some number repeatedly, which requires the **subtrahend** to be TOS.
+
+This can be solved by:
+
+1. Creating alternate versions of every non-commutative instruction that flips the stack arguments.
+    - Doesn't help anything else as we can produce stack values in the correct order.
+    - May require expanding the base instruction width (BAD).
+2. Creating a second register accumulate instruction that inserts the register underneath the TOS.
+    - This doesn't significantly increase decoder complexity as both of these instructions can share the same upper bits.
+
+This may not even need to be solved. The primary instructions to worry about would be subtraction and shifting. Subtraction can be solved through optimization since the **subtrahend** can be accumulated using addition. Shifting is interesting since many workloads don't use a significant amount of shifting, but some use it incredibly heavily.
+
+An important thing to note is that both subtraction and shift accumulate operations will almost always want the accumulator to be under the TOS. Since no previous requirement made them the operand order they are, they can simply be swapped, solving the problem.
+
+This implementation is also good because a simpler design is still possible which executes the read and accumulate in seperate cycles if die area is prioritized over performance. It also doesn't have state if the accumulate is always performed in one cycle, which means dedicated threading and coroutines can still swap without any additional state having to be written or read on a single-cycle notice.
+
+- accumulate
+  - Read a register to the TOS and stores the ALU output of the next instruction to the register.
 
 ### Coroutines
