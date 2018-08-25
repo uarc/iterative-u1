@@ -118,3 +118,50 @@ Coroutines are trivial to implement on a stack machine as they would use the sam
 - get context
   - Allows a coroutine to get its own context, but using the call stack below instead. The value stack address is TOS.
   - This allows interrupts to perform context switches.
+
+### UARC Async and Sync
+
+To support UARC communication, talking over a bus is important. We can communicate in two modes: word and stream.
+
+In word mode, the core should be able to synchronize on word arrival. This can be supported even when threading because the context will say to return to the synchronize instruction which simply only consumes stack parameters and advances the PC once it has recieved something. Waiting for word arrival synchronously shouldn't cause a context switch because if it was expected that the I/O operation would take a while then they would use async methods instead.
+
+- recieve synchronous
+- send synchronous
+
+Async word support would actually be controlled by interrupt handlers. Since each core only executes one thread at a time, checking if something came in over a bus can be done by checking a flag in main memory. This doesn't even require a coroutine since it is such a simple check. However, coroutines will be useful if multiple I/O operations have to happen back-to-back with processing inbetween. If there in an operating system then it should potentially allowing multiple interrupt handlers to be called on an interrupt using its own handler, but for an application running without an OS it should be able to directly set the handlers.
+
+- set recieve interrupt handler
+
+Streaming mode should always be asynchronous, but be accepted synchronously. Sending/recieving streams and sending words asynchronously all have the same problem: an asynchronous operation is initiated, but we probably want to know when it completes. To handle this problem, we will use interrupts as we did before.
+
+- stream out
+- stream in
+- send asynchronous
+- set in interrupt handler
+- set out interrupt handler
+- set send interrupt handler
+
+Note that all interrupt handlers can set interrupts on a per-bus basis. To turn the interrupts off again, set the handler to `-1`.
+
+### Extras
+
+Some instructions are missing that would be helpful to add to the ISA (from greatest performance/program density impact to least):
+
+- multiplication
+- subtraction (not 1 add add)
+- floating point addition/subtraction/multiplication (not division)
+- negation (not 1 add)
+
+Some instructions that are simple enough to go in the ISA, but might be better suited for an application-specific core:
+
+- SIMD
+- rotate left/right (matters more for crypto)
+- advanced bit manipulation (matters more for I/O and crypto)
+
+Some instructions that would be good to add to an on-die coprocessor talking over a UARC bus (in no particular order):
+
+- float and integer division
+- trigonometry
+- square root
+- exponentiation
+- logarithm
