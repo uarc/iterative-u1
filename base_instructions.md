@@ -103,3 +103,18 @@ This implementation is also good because a simpler design is still possible whic
   - Read a register to the TOS and stores the ALU output of the next instruction to the register.
 
 ### Coroutines
+
+Coroutines are trivial to implement on a stack machine as they would use the same pathways as calls would, but they would also need to point at the coroutine's value and call stacks (context) in memory. When a coroutine yields, it needs to be able to access the context of the coroutine that called it to switch to it. It could do this by simply letting the caller pass this on the stack. In that case, every coroutine context switch would require the callee to track the new context of the coroutine. It is probably preferable then that accessing the main memory addresses of the contexts is done automatically by a special coroutine instruction which swaps the current coroutine addresses with the ones on the stack. Since it will always update after execution, it is the responsibility of the caller to update any old contexts (which are now invalid) with the new context information.
+
+- coroutine call
+  - After execution, the coroutine will leave its 2 addresses on the TOS with any return values from yielding below it.
+
+### Threading
+
+`coroutine call` alone cannot allow threading because it writes the context to the stack of the target coroutine. That requires the target coroutine to know it is being called. To solve this, the coroutine system must allow the retrieval and assigning of context. An interrupt actually happens in the same context as the currently executing coroutine, so it just needs to retrieve its own context. The context retrieval always assumes you want the context of the caller because that will be the interrupted coroutine, but it can't know the beginnig of the value stack of the caller, so it uses the TOS address when the instruction is executed. If the interrupt executes this with an empty stack it will get exactly the correct context, but it will otherwise require modifying the value stack pointer.
+
+- set context
+  - After execution, the coroutine will leave nothing on the TOS, meaning the target coroutine can be resumed.
+- get context
+  - Allows a coroutine to get its own context, but using the call stack below instead. The value stack address is TOS.
+  - This allows interrupts to perform context switches.
