@@ -35,13 +35,13 @@ With the current instruction set, to make a call you would first have to have ab
 
 ### Registers
 
-Currently, it is possible to write to the lower addresses of memory to use them like registers. One potential problem is that, when dealing with accumulators, a caller or callee has to push the registers it is using to a stack. This can be mitigated by allowing some registers to be pushed to the stack on a call. This requires no additional instructions, but an additional instruction is required to be able to update registers below in the call stack.
+Currently, it is possible to write to the lower addresses of memory to use them like registers. One potential problem is that, when dealing with accumulators, a caller or callee has to push the registers it is using to a stack. This can be mitigated by allowing some registers to be pushed to the stack on a call. This requires no additional instructions, but an additional instruction is required to be able to update registers below in the call stack. We can just treat the lowest memory addresses specially.
 
 - update
 
 ### Carry (optional)
 
-The lack of a carry bit complicates 64-bit integer handling on 32-bit systems. For 64-bit systems this is not a signifcant concern since any value above 64-bits is likely not a counter and is some sort of GUID. Since 32-bit (and maybe even 16-bit) use cases are still common, it may be necessary to add a carry bit that is preserved on the call stack. To use this bit, the instruction `carry` can be added which adds a 1 to the TOS if the carry bit is set. This allows multi-word addition with one extra instruction. We can similarly define (if desired) an additional `borrow` instruction which subtracts one and then adds the carry, which would allow borrowing during subtraction in one instruction, but it can be done in two instructions otherwise by decrementing and then carrying.
+The lack of a carry bit complicates 64-bit integer handling on 32-bit systems. For 64-bit systems this is not a signifcant concern since any value above 64-bits is likely not a counter and is some sort of GUID, bit vector, or SIMD In Register (SIR) construct. Since 32-bit (and maybe even 16-bit) use cases are still common, it may be necessary to add a carry bit that is preserved on the call stack. To use this bit, the instruction `carry` can be added which adds a 1 to the TOS if the carry bit is set. This allows multi-word addition with one extra instruction. We can similarly define (if desired) an additional `borrow` instruction which subtracts one and then adds the carry, which would allow borrowing during subtraction in one instruction, but it can be done in two instructions otherwise by decrementing and then carrying.
 
 - carry
 - borrow
@@ -56,6 +56,8 @@ One of those things could be to push a set of registers onto the stack at the be
 If we use a dedicated loop instruction, we can make it so any time we move back to the beginning of the loop that the loop puts the registers on the stack. This is especially helpful because the first iteration of the loop gets the initial inputs, just as in the above solution, but even more useful because now we can automatically return to the beginning without specifically requiring the PC, which is more useful for branching paths conditionally exiting the loop or doing other things. This does make returning take an extra instruction to `unloop` the loop, which is not otherwise necessary since no loop stack or any special loop state exists.
 
 Another solution is to use tail-call recursion to implement all loops. In this case, the loop control flow is controlled using existing control-flow instructions. To break the loop, one only needs to return. To continue the loop, one only needs to jump to the beginning. In this case we only need a special jump instruction that copies registers onto the stack to avoid manual register reading on every iteration. This solution is the most practical as it avoids adding new instructions and calls in stack machines are very cheap.
+
+We could also imagine adding an instruction to speed up tail-call recursive loops by performing a register update, comparison, and jump load/return in one instruction. This is something that may be helpful to have after analysis of output assembly from programs, but it is likely to be useful since iteration over any data structure is likely to require this common routine.
 
 - jump load
   - Jump and load `n` non-pc registers to the stack.
@@ -89,7 +91,7 @@ This can be solved by:
 
 1. Creating alternate versions of every non-commutative instruction that flips the stack arguments.
     - Doesn't help anything else as we can produce stack values in the correct order.
-    - May require expanding the base instruction width (BAD).
+    - May require expanding the base instruction width (not good).
 2. Creating a second register accumulate instruction that inserts the register underneath the TOS.
     - This doesn't significantly increase decoder complexity as both of these instructions can share the same upper bits.
 
@@ -99,8 +101,56 @@ An important thing to note is that both subtraction and shift accumulate operati
 
 This implementation is also good because a simpler design is still possible which executes the read and accumulate in seperate cycles if die area is prioritized over performance. It also doesn't have state if the accumulate is always performed in one cycle, which means dedicated threading and coroutines can still swap without any additional state having to be written or read on a single-cycle notice.
 
+We can also have additional accumulates that wait multiple cycles before performing the write-back.
+
 - accumulate
   - Read a register to the TOS and stores the ALU output of the next instruction to the register.
+- accumulate after n
+  - Like `accumulate`, but waits more than one instruction before accumulating.
+
+### Hashing
+
+Hashing is incredibly critical on modern systems. There are different types of hashes required for different things. For instance, to hash sensitive data you may need a cryptographic hash. When the hash itself is not accessible to an attacker, you might only need a Message Authentication Code (MAC). You might need a hash for a hashtable where an attacker cannot control the input data, in that case only speed is a concern so you could use a non-cryptographic hash. We also sometimes want to make hashes that cause collisions on purpose, such as Locality Sensitive Hashing (LSH). All of these techniques are used for different things.
+
+On almost all systems and all situations, it is common to use tables for lookup. The hash table is so common that, to support its use case, a processor should probably provide primitives for its hashing algorithm. For this, we would like to support two use cases:
+
+- Input data is controlled by potential attackers that wish to cause DoS attacks.
+- Input data is trusted/cannot be controled by attackers.
+
+For the first case, SipHash seems to be the current state-of-the-art. It takes about 100-200 cycles on most desktop and server class processors for 8-64 bytes. The SipHash paper (Jean-Philippe Aumasson and Daniel J. Bernstein) suggests that it should be possible to implement a maximally fast SipHash with `1/8` cycles per byte (`64` bits per cycle) and a single cycle for finalization. We can imagine that we have a single instruction that implements a few rounds of SipHash. If it implements 2 rounds, then we can implement SipHash-2-4 by simply running the instruction for each 64-bit input, doing special handling for the last byte padding (if necessary),
+and then (after xoring 0xFF) just running two rounds of the instruction for the finalization. We could also just make the instruction implement 4 rounds of SipHash so that we can do SipHash-4-4 with one instruction for finalization. Either way, this proves that it is possible to add a DoS-attack resistant hash to a hashtable that can be executed in 14 cycles:
+
+- Four inital XOR (8 cycles)
+  - One cycle to fetch/copy the item
+  - One cycle to perform the constant XOR
+- One load and multiple SipRound (2 cycles)
+  - Load requires a cycle
+  - The multiple SipRound are all part of the one SipHash instruction
+- Constant 0xFF load and multiple SipRound (1 cycle)
+- Final output by XORing all 4 64-bit numbers (3 cycles)
+
+By adding two specialized instructions, this process could also take a total of 5 cycles:
+
+- Load two halves of the key (2 cycles)
+- Load first word (1 cycle)
+- Initialize SipHash (1 cycle)
+- Finalize SipHash (1 cycle)
+
+This would require:
+
+- An instruction that consumes 3 words to initialize the SipHash and run one round of it
+- An instruction that consumes 1 word and runs one round of SipHash
+- An instruction that spits out the finalized hash
+
+You could also potentially go even further and add another processor word that initializes the hash and finalizes it in one cycle, which would take a total of 4 cycles, but investigation would need to be done to see if that really made any difference.
+
+At this point there would be no good reason to write a high speed hash since SipHash is fast enough, therefore you no longer need to worry about the tradeoff between hashtable performance and security.
+
+For good measure, the state of the SipHash should be stored on the call stack. We could store it on the main stack, but then it would be an accumulator that is taking up space, so this is not an option. We can store it in the registers, but then we have to choose which registers to store it in. We could store it alongside the general registers, but then we have an additional 4 registers to push to the call stack. I believe storing either one of these ways has tradeoffs and should be evaluated in an actual system with actual software to see which is better. Either way, the instructions are the same:
+
+- sip init
+- sip round
+- sip finalize
 
 ### Coroutines
 
@@ -117,7 +167,7 @@ Coroutines are trivial to implement on a stack machine as they would use the sam
   - After execution, the coroutine will leave nothing on the TOS, meaning the target coroutine can be resumed.
 - get context
   - Allows a coroutine to get its own context, but using the call stack below instead. The value stack address is TOS.
-  - This allows interrupts to perform context switches.
+  - This allows interrupts to perform context switches by calling `get context` before making any calls.
 
 ### UARC Async and Sync
 
