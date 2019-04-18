@@ -1,4 +1,4 @@
-## Core stack ISA:
+# Core stack ISA
 
 The following is the most stripped down core of a stack ISA reasonably possible. Here it is assumed the PC is just at memory address `0`.
 
@@ -12,7 +12,7 @@ The following is the most stripped down core of a stack ISA reasonably possible.
 - write
 - immediate
 
-### Branches
+## Branches
 
 It is possible to branch with the core ISA, but it would require some bit manipulation and is not particularly easy. This is one of the most important problems and should be dealt with first.
 
@@ -20,26 +20,26 @@ It is possible to branch with the core ISA, but it would require some bit manipu
 - branch less than unsigned
 - branch less than signed
 
-### Copy
+## Copy
 
 The core ISA is primarily severely flawed because of the inability to copy values from lower in the stack. This will result in needing to write to memory to read multiple times. The next most optimal ISA is one with a copy instruction added.
 
 - copy
 
-### Calling
+## Calling
 
 With the current instruction set, to make a call you would first have to have absolute code positions and then do `immediate immediate pc_write`. Then to return you would do `pc_write`, but if you had to return data on the stack, then since a `rotate` instruction is not available, it would either need to `write` the return address to memory (which without stack registers would prevent efficient recursion) and then re-read it later or it would require using `copy` on the return address and the caller disposing of the return address, which probably takes two instructions with this system. To avoid this mess, in particular because returning values on the stack is essential, instructions for calling and returning need to be added.
 
 - call
 - return
 
-### Registers
+## Registers
 
 Currently, it is possible to write to the lower addresses of memory to use them like registers. One potential problem is that, when dealing with accumulators, a caller or callee has to push the registers it is using to a stack. This can be mitigated by allowing some registers to be pushed to the stack on a call. This requires no additional instructions, but an additional instruction is required to be able to update registers below in the call stack. We can just treat the lowest memory addresses specially.
 
 - update
 
-### Carry (optional)
+## Carry (optional)
 
 The lack of a carry bit complicates 64-bit integer handling on 32-bit systems. For 64-bit systems this is not a signifcant concern since any value above 64-bits is likely not a counter and is some sort of GUID, bit vector, or SIMD In Register (SIR) construct. Since 32-bit (and maybe even 16-bit) use cases are still common, it may be necessary to add a carry bit that is preserved on the call stack. To use this bit, the instruction `carry` can be added which adds a 1 to the TOS if the carry bit is set. This allows multi-word addition with one extra instruction. We can similarly define (if desired) an additional `borrow` instruction which subtracts one and then adds the carry, which would allow borrowing during subtraction in one instruction, but it can be done in two instructions otherwise by decrementing and then carrying.
 
@@ -47,7 +47,7 @@ The lack of a carry bit complicates 64-bit integer handling on 32-bit systems. F
 - borrow
 - branch carry
 
-### Loops
+## Loops
 
 Any time we are in a loop, we are probably going to be working with registers. This is necessary because a repetitive process has to work on some accumulators that end up in the same stack orientation every iteration. This is a weak point of stack architectures, because the loop iterates a dynamic amount of times. A recursive solution would be "ideal", but that can result in stacks growing to absurd heights to store data just so it can be processed in the right order (the weakness of a stack architecture, data ordering). In a loop, it is preferable to process the data in the order required and utilize registers, while also utilizing the stack for large expressions and other things which are favorable for it. Some things can be done to alleviate the issue loops present.
 
@@ -62,7 +62,7 @@ We could also imagine adding an instruction to speed up tail-call recursive loop
 - jump load
   - Jump and load `n` non-pc registers to the stack.
 
-### Rotate
+## Rotate
 
 It is possible to rotate items on the stack to the top above a certain depth. This allows re-ordering of the stack. Re-ordering the stack is useful for creating accumulators that reside on the stack that are updated multiple times. For values that are computed once and used multiple times, but never updated, copying is useful.
 
@@ -81,7 +81,7 @@ If we can help it, we want to avoid rotation. Backing the stack with real memory
 
 How can rotation be avoided? The register file is another way to store accumulators that doesn't require rotation. However, to accumulate to the register file, we must perform a read-accumulate-write (RAW) operation, which is currently a prohibitive 3 (or 4 if you count the instruction space of the index) instructions. Although this operation could be executed faster than a rotate-accumulate in theory, it increases the instruction decoding logic complexity greatly.
 
-### Efficient accumulation
+## Efficient accumulation
 
 We need to be able to accumulate to the register file ASAP and with as few instructions as possible. Firstly, we don't want to expand the instruction space to include accumulate variants for every register if possible. To reuse existing accumulate operations, it is necessary to combine the writeback step of the accumulation with the existing operation using a stateful register that says where we will writeback to. We could implement this by adding an instruction which fetches the register and then forces the next operation to write its result to the register file, but if we do this then it becomes impossible to do any accumulation operation that requires more than one instruction or requires the accumulator to be the second element on the stack.
 
@@ -108,7 +108,7 @@ We can also have additional accumulates that wait multiple cycles before perform
 - accumulate after n
   - Like `accumulate`, but waits more than one instruction before accumulating.
 
-### Hashing
+## Hashing
 
 Hashing is incredibly critical on modern systems. There are different types of hashes required for different things. For instance, to hash sensitive data you may need a cryptographic hash. When the hash itself is not accessible to an attacker, you might only need a Message Authentication Code (MAC). You might need a hash for a hashtable where an attacker cannot control the input data, in that case only speed is a concern so you could use a non-cryptographic hash. We also sometimes want to make hashes that cause collisions on purpose, such as Locality Sensitive Hashing (LSH). All of these techniques are used for different things.
 
@@ -152,14 +152,14 @@ For good measure, the state of the SipHash should be stored on the call stack. W
 - sip round
 - sip finalize
 
-### Coroutines
+## Coroutines
 
 Coroutines are trivial to implement on a stack machine as they would use the same pathways as calls would, but they would also need to point at the coroutine's value and call stacks (context) in memory. When a coroutine yields, it needs to be able to access the context of the coroutine that called it to switch to it. It could do this by simply letting the caller pass this on the stack. In that case, every coroutine context switch would require the callee to track the new context of the coroutine. It is probably preferable then that accessing the main memory addresses of the contexts is done automatically by a special coroutine instruction which swaps the current coroutine addresses with the ones on the stack. Since it will always update after execution, it is the responsibility of the caller to update any old contexts (which are now invalid) with the new context information.
 
 - coroutine call
   - After execution, the coroutine will leave its 2 addresses on the TOS with any return values from yielding below it.
 
-### Threading
+## Threading
 
 `coroutine call` alone cannot allow threading because it writes the context to the stack of the target coroutine. That requires the target coroutine to know it is being called. To solve this, the coroutine system must allow the retrieval and assigning of context. An interrupt actually happens in the same context as the currently executing coroutine, so it just needs to retrieve its own context. The context retrieval always assumes you want the context of the caller because that will be the interrupted coroutine, but it can't know the beginnig of the value stack of the caller, so it uses the TOS address when the instruction is executed. If the interrupt executes this with an empty stack it will get exactly the correct context, but it will otherwise require modifying the value stack pointer.
 
@@ -169,7 +169,7 @@ Coroutines are trivial to implement on a stack machine as they would use the sam
   - Allows a coroutine to get its own context, but using the call stack below instead. The value stack address is TOS.
   - This allows interrupts to perform context switches by calling `get context` before making any calls.
 
-### UARC Async and Sync
+## UARC Async and Sync
 
 To support UARC communication, talking over a bus is important. We can communicate in two modes: word and stream.
 
@@ -193,7 +193,7 @@ Streaming mode should always be asynchronous, but be accepted synchronously. Sen
 
 Note that all interrupt handlers can set interrupts on a per-bus basis. To turn the interrupts off again, set the handler to `-1`.
 
-### Extras
+## Extras
 
 Some instructions are missing that would be helpful to add to the ISA (from greatest performance/program density impact to least):
 
